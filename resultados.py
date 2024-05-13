@@ -1,184 +1,106 @@
-import numpy as np
 import matplotlib.pyplot as plt
+from MFIS_Read_Functions import readRulesFile, readApplicationsFile, readFuzzySetsFile
+import numpy as np
 import skfuzzy as skf
-from MFIS_Read_Functions import readFuzzySetsFile, readApplicationsFile, readRulesFile
 
+def create_results():
+    # Carga los datos de las reglas, aplicaciones y conjuntos difusos
+    rules = readRulesFile()
+    applications = readApplicationsFile()
+    input_fuzzy_sets = readFuzzySetsFile("InputVarSets.txt")
+    risk_fuzzy_sets = readFuzzySetsFile("Risks.txt")
+    risk_outcomes = []
 
+    # Itera sobre cada aplicación
+    for application in applications:
+        # Calcula los valores de riesgo
+        risk_outcome = calculate_fuzzy_logic(rules, input_fuzzy_sets, application)
+        # Guarda los resultados
+        risk_outcomes.append(f"{application.appId} LowR: {risk_outcome['Risk=LowR']}, "
+                             f"MediumR: {risk_outcome['Risk=MediumR']}, "
+                             f"HighR: {risk_outcome['Risk=HighR']}")
+        # Calcula el centroide
+        centroid_outcome = compute_centroid(risk_outcome, risk_fuzzy_sets)
+        # Guarda el centroide
+        risk_outcomes.append(f"Centroid: {centroid_outcome}\n")
 
-# Función para guardar contenido en un archivo
-def guardar_contenido(archivo, contenido):
-    """Esta función toma un nombre de archivo y contenido como
-    entrada, y escribe el contenido en el archivo especificado."""
+    # Guarda los resultados en un archivo
+    save_to_file("results.txt", "\n".join(risk_outcomes))
 
-    with open(archivo, 'w') as archivo:
-        archivo.write(contenido)
+def calculate_fuzzy_logic(rules, fuzzy_sets, application):
+    # Inicializa los grados de membresía de los riesgos
+    risk_membership = {"Risk=LowR": 0, "Risk=MediumR": 0, "Risk=HighR": 0}
 
+    # Itera sobre cada regla
+    for rule in rules:
+        min_membership = 1
 
-# Función principal para calcular riesgos
-def calcular_riesgos():
-    """Esta función es la función principal que lee las reglas, las aplicaciones y
-    los conjuntos difusos de los archivos correspondientes. Calcula el riesgo para
-    cada aplicación utilizando la lógica difusa y guarda los resultados en un archivo.
-    También llama a la función generar_graficas() para generar gráficos para los conjuntos difusos."""
+        # Calcula el grado de membresía mínimo para cada antecedente de la regla
+        for antecedent in rule.antecedent:
+            fuzzy_set = fuzzy_sets[antecedent]
 
-    # Leemos las reglas desde el archivo correspondiente
-    reglas = readRulesFile()
+            # Encuentra el valor del antecedente en los datos de la aplicación
+            antecedent_value = next(data[1] for data in application.data if data[0] == fuzzy_set.var)
 
-    # Leemos las aplicaciones desde el archivo correspondiente
-    aplicaciones = readApplicationsFile()
+            # Calcula el grado de membresía y actualiza el mínimo
+            membership_value = skf.interp_membership(fuzzy_set.x, fuzzy_set.y, antecedent_value)
+            min_membership = min(min_membership, membership_value)
 
-    # Leemos los conjuntos difusos de las variables de entrada desde el archivo correspondiente
-    conjuntos_difusos_entrada = readFuzzySetsFile("InputVarSets.txt")
+        # Actualiza los grados de membresía de riesgo si es necesario
+        if risk_membership[rule.consequent] < min_membership:
+            risk_membership[rule.consequent] = min_membership
 
-    # Leemos los conjuntos difusos de los riesgos desde el archivo correspondiente
-    conjuntos_difusos_riesgo = readFuzzySetsFile("Risks.txt")
+    return risk_membership
 
-    # Inicializamos una lista para almacenar los resultados
-    lista_resultados = []
+def compute_centroid(risk_membership, risk_fuzzy_sets):
+    # Inicializa las listas para almacenar los segmentos de cada riesgo
+    risk_segments = []
 
-    # Iteramos sobre cada aplicación
-    for app in aplicaciones:
-        # Calculamos el riesgo para la aplicación actual utilizando la lógica difusa
-        valor_riesgo = calcular_logica_difusa(reglas, conjuntos_difusos_entrada, app)
+    # Itera sobre los riesgos y sus grados de membresía
+    for risk, membership in risk_membership.items():
+        # Obtiene los puntos de las funciones de membresía del riesgo
+        x_points = risk_fuzzy_sets[risk].x
+        y_points = risk_fuzzy_sets[risk].y
+        # Encuentra el segmento entre la membresía calculada y la función de membresía del riesgo
+        segment = np.minimum(membership, y_points)
+        # Añade el segmento a la lista
+        risk_segments.append(segment)
 
-        # Añadimos el riesgo calculado a la lista de resultados
-        lista_resultados.append(
-            f"{app.appId} lowR: {round(valor_riesgo['Risk=LowR'], 2)}, "
-            f"MediumR: {round(valor_riesgo['Risk=MediumR'], 2)}, "
-            f"HighR: {round(valor_riesgo['Risk=HighR'], 2)}")
+    # Calcula el centroide utilizando la regla del centroide
+    centroid = skf.defuzz(x_points, np.maximum.reduce(risk_segments), 'centroid')
 
-        # Calculamos el centroide del riesgo
-        centroide = calcular_centroide(valor_riesgo, conjuntos_difusos_riesgo)
+    return centroid
 
-        # Añadimos el centroide a la lista de resultados
-        lista_resultados.append(f"Centroid: {centroide}\n\n")
+def save_to_file(filename, content):
+    with open(filename, 'w') as file:
+        file.write(content)
 
-    # Guardamos los resultados en un archivo
-    guardar_contenido("results.txt", "\n".join(lista_resultados))
+def create_graphics():
+    # Lee los conjuntos difusos
+    input_fuzzy_sets = readFuzzySetsFile("InputVarSets.txt")
+    risk_fuzzy_sets = readFuzzySetsFile("Risks.txt")
+    combined_sets = {**input_fuzzy_sets, **risk_fuzzy_sets}
+    plotted_vars = []
 
-
-# Función para calcular la lógica difusa
-def calcular_logica_difusa(reglas, FuzzySetsDict, Application):
-    """Esta función toma un conjunto de reglas, un diccionario de conjuntos difusos
-    y una aplicación como entrada. Calcula y devuelve el riesgo asociado con la aplicación
-    utilizando lógica difusa."""
-
-    # Inicializamos un diccionario para almacenar los riesgos
-    riesgo = {"Risk=LowR": 0, "Risk=MediumR": 0, "Risk=HighR": 0}
-
-    # Iteramos sobre cada regla
-    for regla in reglas:
-        # Obtenemos la lista de antecedentes y consecuentes de la regla
-        lista_antecedente = regla.antecedent
-        lista_consecuente = regla.consequent
-
-        # Inicializamos el grado de membresía mínimo
-        grado_membresia_minimo = 1
-
-        # Iteramos sobre cada antecedente en la lista de antecedentes
-        for antecendente in lista_antecedente:
-            # Obtenemos el conjunto difuso correspondiente al antecedente
-            conjunto_difuso = FuzzySetsDict[antecendente]
-
-            # Iteramos sobre los datos de la aplicación
-            for dato in Application.data:
-                # Si el nombre de la variable coincide con el del conjunto difuso
-                if dato[0] == conjunto_difuso.var:
-                    # Obtenemos el valor del antecedente
-                    valor_antecedente = dato[1]
-                    break
-
-            # Calculamos el grado de membresía del valor del antecedente en el conjunto difuso
-            grado_membresia = skf.interp_membership(conjunto_difuso.x, conjunto_difuso.y, valor_antecedente)
-
-            # Si el grado de membresía es menor que el grado de membresía mínimo actual
-            if grado_membresia < grado_membresia_minimo:
-                # Actualizamos el grado de membresía mínimo
-                grado_membresia_minimo = grado_membresia
-
-        # Si el grado de membresía mínimo es mayor que el riesgo actual para el consecuente
-        if riesgo[lista_consecuente] < grado_membresia_minimo:
-            # Actualizamos el riesgo para el consecuente
-            riesgo[lista_consecuente] = grado_membresia_minimo
-
-    # Devolvemos el diccionario de riesgos
-    return riesgo
-
-
-# Función para calcular el centroide
-def calcular_centroide(riesgo, conjuntos_difusos_riesgo):
-    """Esta función toma un riesgo y un conjunto de conjuntos difusos de
-    riesgo como entrada. Calcula y devuelve el centroide del riesgo"""
-
-    # Extraemos los valores de riesgo bajo, medio y alto del diccionario de riesgo
-    riesgo_bajo = riesgo['Risk=LowR']
-    riesgo_medio = riesgo['Risk=MediumR']
-    riesgo_alto = riesgo['Risk=HighR']
-
-    # Extraemos los conjuntos difusos de riesgo bajo, medio y alto
-    x_riesgo_bajo = conjuntos_difusos_riesgo['Risk=LowR'].x
-    y_riesgo_bajo = conjuntos_difusos_riesgo['Risk=LowR'].y
-    y_riesgo_medio = conjuntos_difusos_riesgo['Risk=MediumR'].y
-    y_riesgo_alto = conjuntos_difusos_riesgo['Risk=HighR'].y
-
-    # Calculamos los segmentos de riesgo bajo, medio y alto
-    segmento_riesgo_bajo = np.minimum(riesgo_bajo, y_riesgo_bajo)
-    segmento_riesgo_medio = np.minimum(riesgo_medio, y_riesgo_medio)
-    segmento_riesgo_alto = np.minimum(riesgo_alto, y_riesgo_alto)
-
-    # Calculamos el centroide utilizando la función defuzz de la biblioteca skfuzzy
-    centroide = skf.defuzz(x_riesgo_bajo,
-                           np.maximum(segmento_riesgo_bajo, np.maximum(segmento_riesgo_medio, segmento_riesgo_alto)),
-                           'centroid')
-
-    # Devolvemos el valor del centroide
-    return centroide
-
-
-# Función para generar gráficas
-def generar_graficas():
-    """Esta función lee los conjuntos difusos de las variables de entrada y los riesgos
-     de los archivos correspondientes. Genera y muestra gráficos para cada conjunto difuso."""
-
-    # Leemos los conjuntos difusos de las variables de entrada desde el archivo "InputVarSets.txt"
-    conjuntos_difusos_entrada = readFuzzySetsFile("InputVarSets.txt")
-
-    # Leemos los conjuntos difusos de los riesgos desde el archivo "Risks.txt"
-    conjuntos_difusos_riesgo = readFuzzySetsFile("Risks.txt")
-
-    # Combinamos los dos conjuntos difusos en un solo diccionario
-    conjuntos_difusos = {**conjuntos_difusos_entrada, **conjuntos_difusos_riesgo}
-
-    # Inicializamos una lista para almacenar las variables que vamos a graficar
-    variables_a_graficar = []
-
-    # Iteramos sobre cada conjunto difuso en el diccionario
-    for setId, conjunto_difuso in conjuntos_difusos.items():
-        # Si la variable del conjunto difuso actual no está en la lista de variables a graficar
-        if conjunto_difuso.var not in variables_a_graficar:
-            # Si ya hay variables en la lista a graficar, mostramos la gráfica actual
-            if variables_a_graficar:
-                plt.xlabel(variables_a_graficar[-1])
-                plt.ylabel("Grado Membresia")
-                plt.grid(True)
+    # Itera sobre cada conjunto difuso y genera una gráfica
+    for set_id, fuzzy_set in combined_sets.items():
+        if fuzzy_set.var not in plotted_vars:
+            if plotted_vars:
                 plt.legend()
                 plt.show()
-            # Creamos una nueva figura para la próxima gráfica
             plt.figure()
-            # Añadimos la variable del conjunto difuso actual a la lista de variables a graficar
-            variables_a_graficar.append(conjunto_difuso.var)
-        # Graficamos el conjunto difuso actual
-        plt.plot(conjunto_difuso.x, conjunto_difuso.y, label=conjunto_difuso.label)
+            plt.xlabel(fuzzy_set.var)
+            plt.ylabel("Grado Membresia")
+            plt.grid(True)
+            plotted_vars.append(fuzzy_set.var)
+        plt.plot(fuzzy_set.x, fuzzy_set.y, label=fuzzy_set.label)
 
-    # Si hay variables en la lista a graficar, mostramos la última gráfica
-    if variables_a_graficar:
-        plt.xlabel(variables_a_graficar[-1])
-        plt.ylabel("Grado Membresia")
-        plt.grid(True)
+    # Muestra la última figura
+    if plotted_vars:
         plt.legend()
         plt.show()
 
-
-# Llamada a las funciones principales
-calcular_riesgos()
-generar_graficas()
+# Genera los resultados y las gráficas
+create_results()
+'''create_graphics()
+'''
