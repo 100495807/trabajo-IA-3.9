@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 import skfuzzy as skf
 from MFIS_Read_Functions import readFuzzySetsFile, readApplicationsFile, readRulesFile
 
-# Mapeo de etiquetas a valores
-etiquetas_riesgo = {"Risk=HighR": 3, "Risk=MediumR": 2, "Risk=LowR": 1}
 
 
 # Función para guardar contenido en un archivo
