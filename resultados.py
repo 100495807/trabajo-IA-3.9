@@ -102,5 +102,4 @@ def create_graphics():
 
 # Genera los resultados y las gráficas
 create_results()
-'''create_graphics()
-'''
+create_graphics()
